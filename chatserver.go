@@ -6,19 +6,26 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"time"
 )
 
+// Use capitalized filed name to enable json marshalling
+// of field, and then
+// controll json dump use smaller case field name
 type Message struct {
-	timestamp float64
-	user      string
-	text      string
+	Timestamp float64 `json:"timestamp"`
+	User      string  `json:"user"`
+	Text      string  `json:"text"`
 }
 
-// A slice of capacity 100
-var Messages []Message
+// A slice of capacity 200 as internal storage to hold
+// all messages need to be queried.
+const capacity = 100
 
-// var UserSet := map[string]bool
-var users []string
+var messages = make([]Message, 0, capacity*2)
+
+// Use boolean map serve as a set to hold all users
+var users = make(map[string]bool)
 
 func main() {
 	http.HandleFunc("/status",
@@ -40,7 +47,7 @@ func main() {
 func postMessage(c http.ResponseWriter, req *http.Request) {
 	// save message
 	// save user
-	message := make(map[string]string)
+	message := Message{}
 	reqBody, err := ioutil.ReadAll(req.Body)
 	if err != nil {
 		log.Fatal("reqd request body failed!")
@@ -51,30 +58,60 @@ func postMessage(c http.ResponseWriter, req *http.Request) {
 	if errb != nil {
 		log.Fatal("read body failed!")
 	}
-	fmt.Println("user:" + message["user"])
-	fmt.Println("text:" + message["text"])
-	// if len(Messages) == 100 {
-	// 	Messages = Messages[1:]
-	// }
-	// append(messages, message)
-	// UserSet[message.user] = true
-	users = append(users, message["user"])
+	message.Timestamp = getCurtimeStamp()
+	fmt.Println("user:" + message.User)
+	fmt.Println("text:" + message.Text)
+
+	// Store message and user
+	if len(messages) == cap(messages) {
+		z := make([]Message, len(messages), capacity*2)
+		copy(z, messages)
+		messages = z
+	}
+	if len(messages) == capacity {
+		messages = messages[1:]
+	}
+	messages = append(messages, message)
+
+	// save user simply without concerning about capacity
+	users[message.User] = true
 
 	result := make(map[string]bool)
 	result["ok"] = true
-	var data []byte
-	data, _ = json.Marshal(result)
-	fmt.Fprintf(c, "%s\n", data)
+	encoder := json.NewEncoder(c)
+	encoder.SetIndent("", "  ")
+	encoder.Encode(result)
+}
+
+// this logic is to controll output format,
+// using second as granuality, with two more digits
+func getCurtimeStamp() float64 {
+	t := time.Now()
+	tUnixMilli := int64(time.Nanosecond) * t.UnixNano() / int64(time.Millisecond)
+	return float64(tUnixMilli/10) / 100
 }
 
 // list all users, this is simple
 func listUsers(c http.ResponseWriter, req *http.Request) {
-	var data []byte
-	data, _ = json.Marshal(users)
-	fmt.Fprintf(c, "%s", data)
+	// var data []byte
+	// userlist := UserList{}
+	var userl = make([]string, 0, len(users))
+	for k := range users {
+		userl = append(userl, k)
+		fmt.Println("find user:" + k)
+	}
+	result := make(map[string][]string)
+	result["users"] = userl[:]
+	encoder := json.NewEncoder(c)
+	encoder.SetIndent("", "  ")
+	encoder.Encode(result)
 }
 
 // list messages, this is also simple
 func listMessages(c http.ResponseWriter, req *http.Request) {
-	fmt.Fprintf(c, "[hello]")
+	result := make(map[string][]Message)
+	result["messages"] = messages[:]
+	encoder := json.NewEncoder(c)
+	encoder.SetIndent("", "  ")
+	encoder.Encode(result)
 }
